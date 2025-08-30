@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Healthcare Translator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/js/all.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .loading-animation {
+            border-top: 4px solid #3b82f6;
+            border-right: 4px solid transparent;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white transition-colors duration-300 min-h-screen p-4 flex flex-col items-center">
+
+    <div class="w-full max-w-2xl bg-gray-800 rounded-xl shadow-xl p-8 flex flex-col items-center space-y-6">
+        <h1 class="text-4xl font-bold text-blue-400">Healthcare Translator</h1>
+        <p class="text-gray-400 text-center">Speak a medical query to get an instant transcription and translation.</p>
+
+        <!-- Configuration Section -->
+        <div class="w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col">
+                <label for="target-language" class="text-sm font-semibold text-gray-300 mb-1">Target Language (e.g., es, fr, en)</label>
+                <input type="text" id="target-language" class="rounded-lg p-2 bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter language code (e.g., en, es, fr)">
+            </div>
+            <div class="flex flex-col">
+                <label for="model-select" class="text-sm font-semibold text-gray-300 mb-1">Translation Model</label>
+                <select id="model-select" class="rounded-lg p-2 bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="gpt-4o-mini" selected>GPT-4o mini</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Microphone Button -->
+        <button id="record-button" class="w-24 h-24 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg transition-transform duration-200 hover:scale-105 active:scale-95">
+            <i id="mic-icon" class="fa-solid fa-microphone text-3xl transition-opacity duration-300"></i>
+            <div id="loading-spinner" class="loading-animation hidden"></div>
+        </button>
+
+        <!-- Status & Message Area -->
+        <div id="status-message" class="text-center text-sm text-gray-400">Press the button to start recording.</div>
+        <div id="error-message" class="hidden text-center text-red-400 text-sm"></div>
+
+        <!-- Transcription & Translation Display -->
+        <div class="w-full space-y-4 pt-4">
+            <div id="transcription-container" class="bg-gray-700 p-4 rounded-lg shadow-inner">
+                <h3 class="text-lg font-bold text-gray-300 mb-2">Original Transcription</h3>
+                <div id="transcription-text" class="text-gray-200"></div>
+            </div>
+            <div id="translation-container" class="bg-gray-700 p-4 rounded-lg shadow-inner">
+                <h3 class="text-lg font-bold text-gray-300 mb-2">Translated Text</h3>
+                <div id="translation-text" class="text-gray-200"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Replace this with the ngrok URL from your Google Colab output
+        const API_URL = "https://1bf44fb44dd0.ngrok-free.app/";
+
+        const recordButton = document.getElementById('record-button');
+        const micIcon = document.getElementById('mic-icon');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const statusMessage = document.getElementById('status-message');
+        const errorMessage = document.getElementById('error-message');
+        const transcriptionText = document.getElementById('transcription-text');
+        const translationText = document.getElementById('translation-text');
+        const targetLanguageInput = document.getElementById('target-language');
+        const modelSelect = document.getElementById('model-select');
+
+        let isRecording = false;
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBlob;
+
+        recordButton.addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                audioChunks = [];
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+                mediaRecorder.onstop = () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    sendAudioForProcessing();
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                recordButton.classList.add('bg-red-600', 'animate-pulse');
+                recordButton.classList.remove('bg-blue-600');
+                micIcon.classList.remove('fa-microphone');
+                micIcon.classList.add('fa-stop-circle');
+                statusMessage.textContent = 'Recording...';
+                errorMessage.textContent = '';
+                errorMessage.classList.add('hidden');
+                transcriptionText.textContent = '';
+                translationText.textContent = '';
+                
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                errorMessage.textContent = 'Error: Could not access microphone.';
+                errorMessage.classList.remove('hidden');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                isRecording = false;
+                recordButton.classList.remove('bg-red-600', 'animate-pulse');
+                recordButton.classList.add('bg-blue-600');
+                micIcon.classList.remove('fa-stop-circle');
+                micIcon.classList.add('fa-microphone');
+                
+                statusMessage.textContent = 'Processing...';
+                micIcon.classList.add('hidden');
+                loadingSpinner.classList.remove('hidden');
+            }
+        }
+
+        async function sendAudioForProcessing() {
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'audio.webm');
+            formData.append('target_language', targetLanguageInput.value);
+            formData.append('model', modelSelect.value);
+
+            try {
+                const response = await fetch(API_URL + '/process-audio', {
+                    method: 'POST',
+                    body: formData,
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    transcriptionText.textContent = data.source_transcript;
+                    translationText.textContent = data.translated_transcript;
+                    statusMessage.textContent = 'Ready to translate again.';
+                    errorMessage.textContent = '';
+                    errorMessage.classList.add('hidden');
+                } else {
+                    errorMessage.textContent = 'Error: ' + (data.error || 'Server error.');
+                    errorMessage.classList.remove('hidden');
+                    statusMessage.textContent = 'Error processing audio.';
+                }
+            } catch (err) {
+                console.error('Fetch error:', err);
+                errorMessage.textContent = 'Error: Could not connect to the server.';
+                errorMessage.classList.remove('hidden');
+                statusMessage.textContent = 'Error processing audio.';
+            } finally {
+                micIcon.classList.remove('hidden');
+                loadingSpinner.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
